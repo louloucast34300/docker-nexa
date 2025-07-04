@@ -1,0 +1,95 @@
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: "${DOCKER_COMPOSE_NAME}-traefik"
+    command:
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - app-network
+
+  nestjs:
+    build:
+      context: .
+      dockerfile: docker/nestjs/Dockerfile
+    container_name: "${DOCKER_COMPOSE_NAME}-nestjs"
+    command: npm run start:dev
+    volumes:
+      - ./backend:/usr/src/app
+    expose:
+      - 3001
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nestjs.rule=Host(`local.nexa-api.com`)"
+      - "traefik.http.routers.nestjs.entrypoints=web"
+      - "traefik.http.services.nestjs.loadbalancer.server.port=3001"
+    networks:
+      - app-network
+  nextjs:
+    build:
+      context: .
+      dockerfile: docker/nextjs/Dockerfile
+    container_name: "${DOCKER_COMPOSE_NAME}-nextjs"
+    command: npm run dev
+    volumes:
+      - ./frontend:/usr/src/app
+      - /usr/src/app/node_modules
+    expose:
+      - 3000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextjs.rule=Host(`local.nexa.com`)"
+      - "traefik.http.routers.nextjs.entrypoints=web"
+      - "traefik.http.services.nextjs.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.nextjs-headers.headers.customrequestheaders.X-Forwarded-Proto=http"
+      - "traefik.http.routers.nextjs.middlewares=nextjs-headers"
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:15
+    container_name: "${DOCKER_COMPOSE_NAME}-postgres"
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: "${DOCKER_COMPOSE_NAME}-pgadmin"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD}"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.rule=Host(`local.nexa-db.com`)"
+      - "traefik.http.routers.pgadmin.entrypoints=web"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.pgadmin-headers.headers.customrequestheaders.X-Forwarded-Proto=http"
+      - "traefik.http.routers.pgadmin.middlewares=pgadmin-headers"
+    expose:
+      - 80
+    depends_on:
+      - postgres
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  pgdata:
